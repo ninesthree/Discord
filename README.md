@@ -35,8 +35,8 @@ npm start
 - `/status` — shows announce channel, poll interval, and whether Supabase/feed are enabled
 - `/announce <channel_id>` — set the announce channel (owner only)
 - `/menu` — displays an interactive menu in the current channel
-- `/clear [count]` — clears recent messages in the current channel (best-effort) and auto-deletes the final confirmation after 10 seconds
-- `/clear-dm [count]` — clears the bot's recent messages in the DM and auto-deletes the final confirmation after 10 seconds
+- `/clear [count]` — clears recent messages in the current channel (best-effort) and auto-deletes the final confirmation after 2 seconds
+- `/clear-dm [count]` — clears the bot's recent messages in the DM and auto-deletes the final confirmation after 2 seconds
 
 ## Notes
 
