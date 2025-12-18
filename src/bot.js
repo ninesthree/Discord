@@ -360,7 +360,6 @@ client.once(Events.ClientReady, async () => {
             .setDescription('Describe your issue')
             .setRequired(true)
           )
-          .addStringOption(o => o.setName('subject').setDescription('Optional short subject').setRequired(false))
         )
         .addSubcommand(sc => sc
           .setName('close')
@@ -551,7 +550,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (name === 'ticket') {
         const sub = interaction.options.getSubcommand();
         if (sub === 'open') {
-          const subject = interaction.options.getString('subject') || 'Support';
           const issue = interaction.options.getString('issue', true);
           const userMessage = interaction.options.getString('message', true);
           const guild = interaction.guild;
