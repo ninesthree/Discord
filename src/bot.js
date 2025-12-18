@@ -294,11 +294,10 @@ function buildHelpEmbed() {
     .setDescription('Available commands for all users')
     .addFields(
       { name: '/help', value: 'Show this help', inline: false },
-      { name: '/activate', value: 'Acknowledge rules and mark yourself active (local ack)', inline: false },
-      { name: '/reset', value: 'Request a simple reset ack or clear bot messages (best-effort)', inline: false },
+      { name: '/activate', value: 'Activate keys for our plugins', inline: false },
+      { name: '/reset', value: 'Reset your key for our plugins', inline: false },
       { name: '/ticket open', value: 'Create a private support ticket channel', inline: false },
       { name: '/ticket close', value: 'Close the current ticket channel', inline: false },
-      { name: '/issue report', value: 'Report an issue and open a ticket with your description', inline: false },
     )
     .setColor(0x5865F2)
     .setFooter({ text: 'Radiant Archive' });
@@ -334,8 +333,22 @@ client.once(Events.ClientReady, async () => {
         .addIntegerOption(opt => opt.setName('count').setDescription('How many (max 100)').setRequired(false)),
       new SlashCommandBuilder()
         .setName('activate')
-        .setDescription('Acknowledge rules and mark yourself active (local ack)')
-        .setDMPermission(true),
+        .setDescription('Activate your plugin (M2M or VoID) with your key')
+        .setDMPermission(true)
+        .addStringOption(o => o
+          .setName('plugin')
+          .setDescription('Plugin to activate')
+          .addChoices(
+            { name: 'M2M', value: 'M2M' },
+            { name: 'VoID', value: 'VoID' },
+          )
+          .setRequired(true)
+        )
+        .addStringOption(o => o
+          .setName('key')
+          .setDescription('Your activation key (e.g., RA-BETA-0000-0000)')
+          .setRequired(true)
+        ),
       new SlashCommandBuilder()
         .setName('reset')
         .setDescription('Request a simple reset ack or clear bot messages (best-effort)')
@@ -540,7 +553,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
       if (name === 'activate') {
-        await interaction.reply({ content: 'Activation noted. Please follow the rules. If you need support, use /ticket open or /issue report.', ephemeral: true });
+        const plugin = interaction.options.getString('plugin', true);
+        const rawKey = interaction.options.getString('key', true);
+        const masked = mask(rawKey, 4);
+        const user = interaction.user;
+        // Basic format validation
+        const valid = /^RA-[A-Z]+-[0-9A-Z-]+$/i.test(rawKey) || /^RA-BETA-[0-9-]+$/i.test(rawKey);
+        const ack = new EmbedBuilder()
+          .setTitle('Activation Requested')
+          .setDescription(`Plugin: **${plugin}**\nKey: ${masked}\nUser: <@${user.id}>\n\nIf this was a mistake, open a ticket with /ticket open.`)
+          .setColor(valid ? 0x22c55e : 0xF59E0B);
+        try {
+          await interaction.reply({ embeds: [ack], ephemeral: true });
+        } catch {
+          await interaction.reply({ content: `Activation requested for ${plugin}. Key: ${masked}`, ephemeral: true }).catch(() => {});
+        }
+        // Optional staff log
+        if (ANNOUNCE_CHANNEL_ID) {
+          try {
+            const chan = await client.channels.fetch(ANNOUNCE_CHANNEL_ID);
+            if (chan && chan.type === ChannelType.GuildText) {
+              const staff = new EmbedBuilder()
+                .setTitle('Activation Request')
+                .setDescription(`Plugin: **${plugin}**\nKey: ${masked}\nUser: <@${user.id}>`)
+                .setColor(0x5865F2);
+              await chan.send({ embeds: [staff] });
+            }
+          } catch {}
+        }
         return;
       }
       if (name === 'reset') {
