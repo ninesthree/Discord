@@ -21,6 +21,7 @@ const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID ? String(process.env.STAFF_ROLE_
 let TICKETS_CATEGORY_ID = process.env.TICKETS_CATEGORY_ID ? String(process.env.TICKETS_CATEGORY_ID) : null;
 const DEV_ROLE_ID = process.env.DEV_ROLE_ID ? String(process.env.DEV_ROLE_ID) : '1451301740652789934';
 const MOD_ROLE_ID = process.env.MOD_ROLE_ID ? String(process.env.MOD_ROLE_ID) : '1405004910499463266';
+const GITHUB_ISSUES_URL = process.env.GITHUB_ISSUES_URL ? String(process.env.GITHUB_ISSUES_URL) : 'https://github.com/ninesthree/Discord/issues';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -385,13 +386,13 @@ client.once(Events.ClientReady, async () => {
     const appId = client.application.id;
     await rest.put(Routes.applicationCommands(appId), { body: commands });
     console.log('[commands] registered (global)');
-    // Clear any existing per-guild commands to avoid duplicates in the slash picker
+    // Also register per-guild to force immediate schema update in the server
     for (const [gid] of client.guilds.cache) {
       try {
-        await rest.put(Routes.applicationGuildCommands(appId, gid), { body: [] });
-        console.log(`[commands] cleared (guild ${gid})`);
+        await rest.put(Routes.applicationGuildCommands(appId, gid), { body: commands });
+        console.log(`[commands] registered (guild ${gid})`);
       } catch (e) {
-        console.warn(`[commands] guild clear failed ${gid}`, e?.status || e?.message || e);
+        console.warn(`[commands] guild register failed ${gid}`, e?.status || e?.message || e);
       }
     }
   } catch (e) {
@@ -607,7 +608,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
           const intro = new EmbedBuilder()
             .setTitle(`Ticket #${nextNumber}`)
-            .setDescription(`<@&${DEV_ROLE_ID}> & <@&${MOD_ROLE_ID}> — <@${user.id}> "${issue}"\n\n${userMessage}\n\nThanks for reporting an issue during the beta. We will get to you as soon as possible.\nRemember you can report issues via Git too.`)
+            .setDescription((() => {
+              const devmod = `<@&${DEV_ROLE_ID}> & <@&${MOD_ROLE_ID}>`;
+              const mention = `<@${user.id}>`;
+              const msg = `${userMessage}`;
+              if (issue === 'Support') {
+                return `${devmod} , Support , ${mention} Need support?\n\n${msg}\n\nPlease wait while we get to you as soon as possible.`;
+              }
+              if (issue === 'Bug') {
+                return `${devmod} , Bug , ${mention} Thanks reporting a issue during the beta\n\n${msg}\n\nPlease wait while we get to you as soon as possible, remember you can report bugs via Github too\nLink = ${GITHUB_ISSUES_URL}`;
+              }
+              if (issue === 'Key') {
+                return `${devmod} , Key , ${mention} Having issues with the claimed key?\n\n${msg}\n\nPlease wait while we get to you`;
+              }
+              // Fallback
+              return `${devmod} , ${issue} , ${mention}\n\n${msg}\n\nPlease wait while we get to you as soon as possible.`;
+            })())
             .setColor(0xF59E0B);
           try { await chan.send({ embeds: [intro] }); } catch {}
           await interaction.reply({ content: `Ticket created: <#${chan.id}>`, ephemeral: true });
