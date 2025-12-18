@@ -375,6 +375,10 @@ if (ALLOW_MESSAGE_CONTENT) {
 
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  // Ensure visible online presence
+  try {
+    await client.user.setPresence({ status: 'online', activities: [{ name: 'Radiant Archive', type: 0 }] });
+  } catch {}
   // Register global slash commands for DM-safe operations (no Message Content intent needed)
   try {
     const commands = [
