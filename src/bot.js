@@ -77,6 +77,32 @@ function mask(token, showLast = 4) {
   return '•'.repeat(s.length - showLast) + s.slice(-showLast);
 }
 
+// Check Supabase user_keys for a key linked to a given Discord ID
+async function validateKeyLinkedToDiscord(rawKey, discordId) {
+  try {
+    const base = (SUPABASE_URL || '').replace(/\/$/, '');
+    const serviceKey = SUPABASE_SERVICE_ROLE_KEY;
+    if (!base || !serviceKey) return { ok: false, reason: 'service_key_missing' };
+    // Try matching on common key columns and ensure discord_id matches
+    const url = `${base}/rest/v1/${KEYS_TABLE}?select=key_id,raw_token,token,key,discord_id,user_id,status,expires_at&or=(raw_token.eq.${encodeURIComponent(rawKey)},token.eq.${encodeURIComponent(rawKey)},key.eq.${encodeURIComponent(rawKey)})&discord_id.eq.${encodeURIComponent(discordId)}&limit=1`;
+    const res = await fetch(url, { headers: headersJSON(serviceKey), cache: 'no-store' });
+    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
+    const rows = await res.json();
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row) return { ok: false, reason: 'not_linked' };
+    // Optional: basic status checks
+    const status = String(row.status || '').toLowerCase();
+    if (status === 'revoked') return { ok: false, reason: 'revoked' };
+    if (row.expires_at) {
+      const exp = new Date(row.expires_at);
+      if (!isNaN(exp) && exp < new Date()) return { ok: false, reason: 'expired' };
+    }
+    return { ok: true, row };
+  } catch (e) {
+    return { ok: false, reason: 'exception', error: e?.message || String(e) };
+  }
+}
+
 function buildDmEmbedExact(token) {
   return new EmbedBuilder()
     .setTitle('RadiantArchive')
@@ -294,9 +320,9 @@ function buildHelpEmbed() {
     .setDescription('Available commands for all users')
     .addFields(
       { name: '/help', value: 'Show this help', inline: false },
-      { name: '/activate', value: 'Activate keys for our plugins', inline: false },
-      { name: '/reset', value: 'Reset your key for our plugins', inline: false },
-      { name: '/ticket open', value: 'Create a private support ticket channel', inline: false },
+        { name: '/activate', value: 'Activate beta key for our plugins', inline: false },
+        { name: '/reset', value: 'Reset your key for our plugins', inline: false },
+        { name: '/ticket open', value: 'Create a support ticket', inline: false },
       { name: '/ticket close', value: 'Close the current ticket channel', inline: false },
     )
     .setColor(0x5865F2)
@@ -557,16 +583,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const rawKey = interaction.options.getString('key', true);
         const masked = mask(rawKey, 4);
         const user = interaction.user;
-        // Basic format validation
-        const valid = /^RA-[A-Z]+-[0-9A-Z-]+$/i.test(rawKey) || /^RA-BETA-[0-9-]+$/i.test(rawKey);
+        // Basic format check and Supabase validation
+        const formatValid = /^RA-[A-Z]+-[0-9A-Z-]+$/i.test(rawKey) || /^RA-BETA-[0-9-]+$/i.test(rawKey);
+        // Check if key is linked to this Discord user in Supabase
+        const linked = await validateKeyLinkedToDiscord(rawKey, user.id);
+        const statusColor = linked.ok && formatValid ? 0x22c55e : 0xF59E0B;
+        const reasonText = linked.ok
+          ? 'Key link verified.'
+          : linked.reason === 'not_linked'
+            ? 'This key is not linked to your Discord ID. Activation cannot proceed.'
+            : linked.reason === 'revoked'
+              ? 'This key is revoked.'
+              : linked.reason === 'expired'
+                ? 'This key is expired.'
+                : linked.reason === 'service_key_missing'
+                  ? 'Server configuration missing for Supabase validation.'
+                  : 'Could not validate the key link right now.';
         const ack = new EmbedBuilder()
           .setTitle('Activation Requested')
-          .setDescription(`Plugin: **${plugin}**\nKey: ${masked}\nUser: <@${user.id}>\n\nIf this was a mistake, open a ticket with /ticket open.`)
-          .setColor(valid ? 0x22c55e : 0xF59E0B);
+          .setDescription(`Plugin: **${plugin}**\nKey: ${masked}\nUser: <@${user.id}>\n\n${reasonText}\nIf this was a mistake, open a ticket with /ticket open.`)
+          .setColor(statusColor);
         try {
           await interaction.reply({ embeds: [ack], ephemeral: true });
         } catch {
-          await interaction.reply({ content: `Activation requested for ${plugin}. Key: ${masked}`, ephemeral: true }).catch(() => {});
+          await interaction.reply({ content: `Activation requested for ${plugin}. Key: ${masked} — ${reasonText}`, ephemeral: true }).catch(() => {});
         }
         // Optional staff log
         if (ANNOUNCE_CHANNEL_ID) {
@@ -575,7 +615,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (chan && chan.type === ChannelType.GuildText) {
               const staff = new EmbedBuilder()
                 .setTitle('Activation Request')
-                .setDescription(`Plugin: **${plugin}**\nKey: ${masked}\nUser: <@${user.id}>`)
+                .setDescription(`Plugin: **${plugin}**\nKey: ${masked}\nUser: <@${user.id}>\nValidation: ${linked.ok ? 'linked' : linked.reason || 'unknown'}`)
                 .setColor(0x5865F2);
               await chan.send({ embeds: [staff] });
             }
