@@ -30,6 +30,7 @@ const KEYS_TABLE = 'user_keys';
 
 const FEED_URL = process.env.FEED_URL || 'http://localhost:3000/api/bot/claim-feed';
 const MARK_URL = process.env.MARK_URL || 'http://localhost:3000/api/bot/claim-feed/mark';
+const ACTIVATE_VALIDATE_URL = process.env.ACTIVATE_VALIDATE_URL || 'http://localhost:3000/api/plugins/activate/validate';
 
 if (!BOT_TOKEN) {
   console.error('Missing BOT_TOKEN in .env');
@@ -40,13 +41,14 @@ if (!BOT_TOKEN) {
 const intents = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.DirectMessages,
 ];
 if (ALLOW_MESSAGE_CONTENT) intents.push(GatewayIntentBits.MessageContent);
 
 const client = new Client({
   intents,
-  partials: [Partials.Channel],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
 // ---- Utils ----
@@ -80,17 +82,30 @@ function mask(token, showLast = 4) {
 // Check Supabase user_keys for a key linked to a given Discord ID
 async function validateKeyLinkedToDiscord(rawKey, discordId) {
   try {
+    // Prefer website endpoint for validation to centralize logic and RLS
+    if (ACTIVATE_VALIDATE_URL) {
+      try {
+        const res = await fetch(ACTIVATE_VALIDATE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: rawKey, discordId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return data.ok ? { ok: true, row: data.row } : { ok: false, reason: data.reason || 'not_linked' };
+        }
+      } catch {}
+    }
+    // Fallback: direct Supabase check
     const base = (SUPABASE_URL || '').replace(/\/$/, '');
     const serviceKey = SUPABASE_SERVICE_ROLE_KEY;
     if (!base || !serviceKey) return { ok: false, reason: 'service_key_missing' };
-    // Try matching on common key columns and ensure discord_id matches
     const url = `${base}/rest/v1/${KEYS_TABLE}?select=key_id,raw_token,token,key,discord_id,user_id,status,expires_at&or=(raw_token.eq.${encodeURIComponent(rawKey)},token.eq.${encodeURIComponent(rawKey)},key.eq.${encodeURIComponent(rawKey)})&discord_id.eq.${encodeURIComponent(discordId)}&limit=1`;
     const res = await fetch(url, { headers: headersJSON(serviceKey), cache: 'no-store' });
     if (!res.ok) return { ok: false, reason: `http_${res.status}` };
     const rows = await res.json();
     const row = Array.isArray(rows) ? rows[0] : rows;
     if (!row) return { ok: false, reason: 'not_linked' };
-    // Optional: basic status checks
     const status = String(row.status || '').toLowerCase();
     if (status === 'revoked') return { ok: false, reason: 'revoked' };
     if (row.expires_at) {
@@ -329,6 +344,9 @@ function buildHelpEmbed() {
     .setFooter({ text: 'Radiant Archive' });
 }
 
+// Track menu messages for reaction handling
+const MENU_MESSAGE_IDS = new Set();
+
 // ---- Message triggers ----
 // Disable legacy text triggers/menu; use slash commands only
 
@@ -473,12 +491,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       if (name === 'help') {
         const embed = buildHelpEmbed();
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], ephemeral: false });
         return;
       }
       if (name === 'menu') {
         const embed = buildHelpEmbed();
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], ephemeral: false, fetchReply: true });
+        const msg = await interaction.fetchReply();
+        try { await msg.react('🌐'); MENU_MESSAGE_IDS.add(msg.id); } catch {}
         return;
       }
       if (name === 'announce') {
@@ -608,7 +628,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch {
           await interaction.reply({ content: `Activation requested for ${plugin}. Key: ${masked} — ${reasonText}`, ephemeral: true }).catch(() => {});
         }
-        // Optional staff log
+        // Reject if not linked; do not proceed to staff log when unlinked
+        if (!linked.ok) { return; }
+        // Staff log when linked OK
         if (ANNOUNCE_CHANNEL_ID) {
           try {
             const chan = await client.channels.fetch(ANNOUNCE_CHANNEL_ID);
