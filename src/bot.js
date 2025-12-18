@@ -344,6 +344,40 @@ function buildHelpEmbed() {
     .setFooter({ text: 'Radiant Archive' });
 }
 
+function buildStatusCard() {
+  const servers = client.guilds.cache.size;
+  const users = new Set();
+  try {
+    for (const [, g] of client.guilds.cache) {
+      for (const [, m] of g.members.cache) users.add(m.user.id);
+    }
+  } catch {}
+  const shards = client.shard?.count || 1;
+  const prefixes = '/';
+  const lang = 'en-US';
+  const redVer = 'N/A';
+  const djsVer = 'discord.js v14';
+  const storage = 'Supabase + JSON';
+  const left = [
+    `Prefixes           │ ${prefixes}`,
+    `Language           │ ${lang}`,
+    `Red version        │ ${redVer}`,
+    `Discord.js version │ ${djsVer}`,
+    `Storage type       │ ${storage}`,
+  ].join('\n');
+  const right = [
+    `Shards       │ ${shards}`,
+    `Servers      │ ${servers}`,
+    `Unique Users │ ${users.size || client.users.cache.size}`,
+  ].join('\n');
+  const box = [
+    '╭────── Radiant Companion ──────╮ ╭─────────────────────╮',
+    `│  ${left.replace(/\n/g, '\n│  ')}  │ │  ${right.replace(/\n/g, '\n│  ')}  │`,
+    '╰───────────────────────────────╯ ╰─────────────────────╯',
+  ].join('\n');
+  return new EmbedBuilder().setDescription(box).setColor(0x5865F2);
+}
+
 // Track menu messages for reaction handling
 const MENU_MESSAGE_IDS = new Set();
 
@@ -485,8 +519,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const name = interaction.commandName;
       if (name === 'status') {
-        const text = `Announce: ${ANNOUNCE_CHANNEL_ID ? `set (${ANNOUNCE_CHANNEL_ID})` : 'unset'} | Interval: ${POLL_INTERVAL}s | Feed: ${FEED_URL ? 'on' : 'off'} | Supabase: ${SUPABASE_URL ? 'on' : 'off'}`;
-        await interaction.reply({ content: text, ephemeral: false });
+        const card = buildStatusCard();
+        await interaction.reply({ embeds: [card], ephemeral: false });
         return;
       }
       if (name === 'help') {
